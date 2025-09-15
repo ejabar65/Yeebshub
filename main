@@ -3,6 +3,7 @@ local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local HttpService = game:GetService("HttpService")
+local MarketplaceService = game:GetService("MarketplaceService")
 local LocalPlayer = Players.LocalPlayer or Players:GetPropertyChangedSignal("LocalPlayer"):Wait() and Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
@@ -13,7 +14,6 @@ do
         if gui:IsA("ScreenGui") then
             for _, prefix in ipairs(prefixes) do
                 if gui.Name:sub(1, #prefix) == prefix then
-                    -- destroy old matching GUIs, wrapped in pcall for safety
                     pcall(function() gui:Destroy() end)
                     break
                 end
@@ -44,6 +44,113 @@ local ScreenGui = new("ScreenGui", {
     IgnoreGuiInset = true,
     Parent = PlayerGui,
 })
+
+-- Generic results renderer + search function (re-usable for Search and Scripts panels)
+local function showResults(scripts, resultsFrame, append)
+    if not resultsFrame or not resultsFrame.Parent then return end
+
+    -- If not appending, clear existing content; otherwise keep existing children and append
+    if not append then
+        resultsFrame:ClearAllChildren()
+    end
+
+    -- Ensure UIListLayout exists
+    local layout = resultsFrame:FindFirstChildOfClass("UIListLayout")
+    if not layout then
+        layout = new("UIListLayout", { Parent = resultsFrame, Padding = UDim.new(0,8), SortOrder = Enum.SortOrder.LayoutOrder })
+    end
+
+    -- Count existing frames (so new items append after)
+    local existingCount = 0
+    for _, child in ipairs(resultsFrame:GetChildren()) do
+        if child:IsA("Frame") then existingCount = existingCount + 1 end
+    end
+
+    for i, s in ipairs(scripts) do
+        local index = existingCount + i
+        local card = new("Frame", {
+            Parent = resultsFrame,
+            Size = UDim2.new(1, -8, 0, 56),
+            BackgroundColor3 = Color3.fromRGB(44,44,46),
+            LayoutOrder = index,
+        })
+        new("UICorner", { Parent = card, CornerRadius = UDim.new(0,8) })
+
+        local label = new("TextLabel", {
+            Parent = card,
+            Position = UDim2.new(0, 12, 0, 8),
+            Size = UDim2.new(0.7, -12, 0, 20),
+            BackgroundTransparency = 1,
+            Text = s.name or "Unknown",
+            Font = Enum.Font.GothamSemibold,
+            TextSize = 15,
+            TextColor3 = Color3.fromRGB(230,230,230),
+            TextXAlignment = Enum.TextXAlignment.Left,
+        })
+
+        local runBtn = new("TextButton", {
+            Parent = card,
+            Position = UDim2.new(1, -96, 0, 10),
+            Size = UDim2.new(0, 80, 0, 36),
+            BackgroundColor3 = Color3.fromRGB(58,138,255),
+            Text = "Run",
+            Font = Enum.Font.GothamBold,
+            TextSize = 14,
+            TextColor3 = Color3.fromRGB(255,255,255),
+            AutoButtonColor = false,
+        })
+        new("UICorner", { Parent = runBtn, CornerRadius = UDim.new(0,8) })
+
+        runBtn.MouseEnter:Connect(function() TweenService:Create(runBtn, TweenInfo.new(0.12), {Size = UDim2.new(0, 86, 0, 40)}):Play() end)
+        runBtn.MouseLeave:Connect(function() TweenService:Create(runBtn, TweenInfo.new(0.12), {Size = UDim2.new(0, 80, 0, 36)}):Play() end)
+
+        runBtn.MouseButton1Click:Connect(function()
+            if s.url and s.url ~= "" then
+                pcall(function()
+                    loadstring(game:HttpGet(s.url))()
+                end)
+            end
+        end)
+    end
+
+    -- Update canvas size whenever content changes
+    layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        resultsFrame.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 12)
+    end)
+    -- set it once
+    resultsFrame.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 12)
+end
+
+local function searchScripts(query, resultsFrame, append)
+    if not query or query == "" then
+        if resultsFrame and not append then showResults({}, resultsFrame, false) end
+        return
+    end
+
+    -- ScriptBlox API search
+    local url = "https://scriptblox.com/api/script/search?q="..HttpService:UrlEncode(query)
+    local ok, resp = pcall(function() return game:HttpGet(url) end)
+    if ok and resp then
+        local success, data = pcall(function() return HttpService:JSONDecode(resp) end)
+        if success and data and data.result and data.result.scripts then
+            local scripts = {}
+            for _, item in ipairs(data.result.scripts) do
+                local rawUrl = ""
+                if item.script then
+                    rawUrl = item.script:match('game:HttpGet%(%s*"([^"]+)"') or ""
+                end
+                table.insert(scripts, {
+                    name = item.title or item.scriptName or "Unknown",
+                    url = rawUrl,
+                })
+            end
+            showResults(scripts, resultsFrame, append)
+            return
+        end
+    end
+    -- on failure show nothing (or append nothing)
+    if resultsFrame and not append then showResults({}, resultsFrame, false) end
+end
 
 -- Taskbar (bottom)
 local TaskBar = new("Frame", {
@@ -184,7 +291,6 @@ local function selectTab(name)
     selectedTab = name
     for tName, btn in pairs(tabs) do
         local isSel = tName == name
-        -- animate selection background / text color
         if isSel then
             TweenService:Create(btn.Indicator, TweenInfo.new(0.25, Enum.EasingStyle.Quad), {BackgroundTransparency = 0}):Play()
             TweenService:Create(btn.Label, TweenInfo.new(0.25, Enum.EasingStyle.Quad), {TextColor3 = Color3.fromRGB(255,255,255)}):Play()
@@ -194,14 +300,12 @@ local function selectTab(name)
         end
     end
 
-    -- show correct panel
     for pName, panel in pairs(panels) do
         panel.Visible = (pName == name)
         if panel.Visible then
             panel.Size = UDim2.new(1, 0, 1, 0)
             panel.Position = UDim2.new(0, 0, 0, 0)
             panel.ClipsDescendants = true
-            -- entrance animation
             panel.BackgroundTransparency = 1
             TweenService:Create(panel, TweenInfo.new(0.28, Enum.EasingStyle.Quad), {BackgroundTransparency = 0}):Play()
         else
@@ -250,7 +354,6 @@ for i, name in ipairs(tabNames) do
         AutoButtonColor = false,
     })
 
-    -- hover feedback for row
     btn.MouseEnter:Connect(function()
         TweenService:Create(label, TweenInfo.new(0.18, Enum.EasingStyle.Quad), {TextColor3 = Color3.fromRGB(220,220,220)}):Play()
     end)
@@ -268,7 +371,6 @@ for i, name in ipairs(tabNames) do
     tabs[name].Indicator = indicator
     tabs[name].Label = label
 
-    -- create panel for this tab
     local panel = new("Frame", {
         Parent = ContentArea,
         Name = name.."Panel",
@@ -332,99 +434,20 @@ do
         CanvasSize = UDim2.new(0, 0, 0, 0),
         ScrollBarThickness = 6,
     })
-    local layout = new("UIListLayout", { Parent = resultsFrame, Padding = UDim.new(0,8), SortOrder = Enum.SortOrder.LayoutOrder })
-
-    local function showResults(scripts)
-        resultsFrame:ClearAllChildren()
-        local layout = new("UIListLayout", { Parent = resultsFrame, Padding = UDim.new(0,8), SortOrder = Enum.SortOrder.LayoutOrder })
-        for i, s in ipairs(scripts) do
-            local card = new("Frame", {
-                Parent = resultsFrame,
-                Size = UDim2.new(1, -8, 0, 56),
-                BackgroundColor3 = Color3.fromRGB(44,44,46),
-                LayoutOrder = i,
-            })
-            new("UICorner", { Parent = card, CornerRadius = UDim.new(0,8) })
-            local label = new("TextLabel", {
-                Parent = card,
-                Position = UDim2.new(0, 12, 0, 8),
-                Size = UDim2.new(0.7, -12, 0, 20),
-                BackgroundTransparency = 1,
-                Text = s.name or "Unknown",
-                Font = Enum.Font.GothamSemibold,
-                TextSize = 15,
-                TextColor3 = Color3.fromRGB(230,230,230),
-                TextXAlignment = Enum.TextXAlignment.Left,
-            })
-            local runBtn = new("TextButton", {
-                Parent = card,
-                Position = UDim2.new(1, -96, 0, 10),
-                Size = UDim2.new(0, 80, 0, 36),
-                BackgroundColor3 = Color3.fromRGB(58,138,255),
-                Text = "Run",
-                Font = Enum.Font.GothamBold,
-                TextSize = 14,
-                TextColor3 = Color3.fromRGB(255,255,255),
-                AutoButtonColor = false,
-            })
-            new("UICorner", { Parent = runBtn, CornerRadius = UDim.new(0,8) })
-            runBtn.MouseButton1Click:Connect(function()
-                if s.url and s.url ~= "" then
-                    pcall(function()
-                        loadstring(game:HttpGet(s.url))()
-                    end)
-                end
-            end)
-        end
-        -- update canvas size
-        if layout then
-            resultsFrame.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 12)
-        end
-    end
-
-    local function searchScripts(query)
-        -- ScriptBlox API search
-        local url = "https://scriptblox.com/api/script/search?q="..HttpService:UrlEncode(query)
-        local ok, resp = pcall(function()
-            return game:HttpGet(url)
-        end)
-        if ok and resp then
-            local data = HttpService:JSONDecode(resp)
-            local scripts = {}
-            if data and data.result and data.result.scripts then
-                for _, item in ipairs(data.result.scripts) do
-                    local rawUrl = ""
-                    if item.script then
-                        -- extract URL from loadstring
-                        rawUrl = item.script:match('game:HttpGet%(%s*"([^"]+)"') or ""
-                    end
-                    table.insert(scripts, {
-                        name = item.title or "Unknown",
-                        url = rawUrl,
-                    })
-                end
-            end
-            showResults(scripts)
-        else
-            showResults({})
-        end
-    end
+    new("UIListLayout", { Parent = resultsFrame, Padding = UDim.new(0,8), SortOrder = Enum.SortOrder.LayoutOrder })
 
     searchBtn.MouseButton1Click:Connect(function()
         local query = searchBox.Text
         if query and query ~= "" then
-            showResults({})
-            searchScripts(query)
+            searchScripts(query, resultsFrame, false)
         end
     end)
 end
 
--- populate template buttons in each panel
-
 -- Home panel
 do
     local p = panels["Home"]
-    local info = new("TextLabel", {
+    new("TextLabel", {
         Parent = p,
         Position = UDim2.new(0, 20, 0, 14),
         Size = UDim2.new(1, -40, 0, 28),
@@ -440,9 +463,7 @@ do
         {label = "Open Scripts Tab", cb = function() selectTab("Scripts") end},
         {label = "Toggle Settings", cb = function() selectTab("Settings") end},
         {label = "Close Hub", cb = function()
-            -- animate collapse
             TweenService:Create(Hub, TweenInfo.new(0.4, Enum.EasingStyle.Quint), {Size = UDim2.new(1, -40, 0, 0), Position = UDim2.new(0, 20, 1, -72)}):Play()
-            hubOpen = false
         end},
     }
 
@@ -462,14 +483,13 @@ do
         b.MouseEnter:Connect(function() TweenService:Create(b, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(64,72,92)}):Play() end)
         b.MouseLeave:Connect(function() TweenService:Create(b, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(48,48,50)}):Play() end)
         b.MouseButton1Click:Connect(function()
-            -- click animation
             TweenService:Create(b, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, true), {Position = b.Position + UDim2.new(0,6,0,0)}):Play()
             pcall(act.cb)
         end)
     end
 end
 
--- Scripts panel (example list + run buttons)
+-- Scripts panel (example list + run buttons + auto-fetch for current game)
 do
     local p = panels["Scripts"]
     local title = new("TextLabel", {
@@ -494,11 +514,17 @@ do
     })
     new("UIListLayout", { Parent = scriptsList, Padding = UDim.new(0,8), SortOrder = Enum.SortOrder.LayoutOrder })
 
-    -- template scripts
+    -- template scripts (kept)
     local sampleScripts = {
-        {name = "Frontlines ESP, AIMBOT, and FOV RING", action = function() loadstring(game:HttpGet("https://raw.githubusercontent.com/PUSCRIPTS/PINGUIN/refs/heads/main/FrontLines"))()
-loadstring(game:HttpGet("https://raw.githubusercontent.com/ejabar65/frontlines/refs/heads/main/main"))() end},
-        {name = "Ring parts floating rings around your player best in natural disaster survival", action = function() loadstring(game:HttpGet('https://pastebin.com/raw/s6jT7YbN'))() end},
+        {name = "Frontlines ESP, AIMBOT, and FOV RING", action = function()
+            pcall(function()
+                loadstring(game:HttpGet("https://raw.githubusercontent.com/PUSCRIPTS/PINGUIN/refs/heads/main/FrontLines"))()
+                loadstring(game:HttpGet("https://raw.githubusercontent.com/ejabar65/frontlines/refs/heads/main/main"))()
+            end)
+        end},
+        {name = "Ring parts floating rings around your player best in natural disaster survival", action = function()
+            pcall(function() loadstring(game:HttpGet('https://pastebin.com/raw/s6jT7YbN'))() end)
+        end},
         {name = "MORE SOON", action = function() print("skidder!") end},
     }
 
@@ -510,7 +536,7 @@ loadstring(game:HttpGet("https://raw.githubusercontent.com/ejabar65/frontlines/r
             LayoutOrder = i,
         })
         new("UICorner", { Parent = card, CornerRadius = UDim.new(0,8) })
-        local label = new("TextLabel", {
+        new("TextLabel", {
             Parent = card,
             Position = UDim2.new(0, 12, 0, 8),
             Size = UDim2.new(0.7, -12, 0, 20),
@@ -536,18 +562,28 @@ loadstring(game:HttpGet("https://raw.githubusercontent.com/ejabar65/frontlines/r
         runBtn.MouseEnter:Connect(function() TweenService:Create(runBtn, TweenInfo.new(0.12), {Size = UDim2.new(0, 86, 0, 40)}):Play() end)
         runBtn.MouseLeave:Connect(function() TweenService:Create(runBtn, TweenInfo.new(0.12), {Size = UDim2.new(0, 80, 0, 36)}):Play() end)
         runBtn.MouseButton1Click:Connect(function()
-            -- run template action
             pcall(s.action)
-            -- feedback flash
             local orig = runBtn.BackgroundColor3
             TweenService:Create(runBtn, TweenInfo.new(0.14), {BackgroundColor3 = Color3.fromRGB(80,200,120)}):Play()
             task.delay(0.22, function()
-                pcall(function()
-                    TweenService:Create(runBtn, TweenInfo.new(0.22), {BackgroundColor3 = orig}):Play()
-                end)
+                pcall(function() TweenService:Create(runBtn, TweenInfo.new(0.22), {BackgroundColor3 = orig}):Play() end)
             end)
         end)
     end
+
+    -- add a small header to show we're fetching community scripts for the current game
+    local header = new("TextLabel", {
+        Parent = scriptsList,
+        Position = UDim2.new(0, 12, 0, 0),
+        Size = UDim2.new(1, -24, 0, 22),
+        BackgroundTransparency = 1,
+        Text = "Community scripts for this game:",
+        Font = Enum.Font.Gotham,
+        TextSize = 13,
+        TextColor3 = Color3.fromRGB(200,200,200),
+        LayoutOrder = #sampleScripts + 1,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    })
 
     -- update canvas size after populating
     local layout = scriptsList:FindFirstChildOfClass("UIListLayout")
@@ -556,12 +592,30 @@ loadstring(game:HttpGet("https://raw.githubusercontent.com/ejabar65/frontlines/r
             scriptsList.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 12)
         end)
     end
+
+    -- fetch current game's name safely
+    local gameName = nil
+    pcall(function()
+        local info = MarketplaceService:GetProductInfo(game.PlaceId, Enum.InfoType.Product)
+        if info and info.Name then
+            gameName = info.Name
+        end
+    end)
+    -- fallback
+    if not gameName then
+        local placeIdFallback = tostring(game.PlaceId or 0)
+        gameName = "Place "..placeIdFallback
+    end
+
+    -- perform search using the same API and append results to scriptsList
+    -- append = true so we keep the templates and add the fetched scripts after
+    searchScripts(gameName, scriptsList, true)
 end
 
 -- Settings panel (template toggles & sliders)
 do
     local p = panels["Settings"]
-    local title = new("TextLabel", {
+    new("TextLabel", {
         Parent = p,
         Position = UDim2.new(0, 20, 0, 14),
         Size = UDim2.new(1, -40, 0, 28),
@@ -644,7 +698,7 @@ end
 -- About panel
 do
     local p = panels["About"]
-    local title = new("TextLabel", {
+    new("TextLabel", {
         Parent = p,
         Position = UDim2.new(0, 20, 0, 14),
         Size = UDim2.new(1, -40, 0, 28),
@@ -656,7 +710,7 @@ do
         TextXAlignment = Enum.TextXAlignment.Left,
     })
 
-    local body = new("TextLabel", {
+    new("TextLabel", {
         Parent = p,
         Position = UDim2.new(0, 20, 0, 52),
         Size = UDim2.new(0.6, -20, 0, 120),
@@ -683,7 +737,6 @@ local function setHub(open)
             Size = UDim2.new(1, -40, 0, 360),
             Position = UDim2.new(0, 20, 1, -72 - 360),
         }):Play()
-        -- select default tab
         selectTab("Home")
     else
         TweenService:Create(Hub, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
