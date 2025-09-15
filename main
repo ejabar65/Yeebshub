@@ -6,10 +6,19 @@ local HttpService = game:GetService("HttpService")
 local LocalPlayer = Players.LocalPlayer or Players:GetPropertyChangedSignal("LocalPlayer"):Wait() and Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
--- Remove other GUIs
-for _, gui in ipairs(PlayerGui:GetChildren()) do
-    if gui:IsA("ScreenGui") and gui.Name ~= "YEEBSHUB" then
-        gui:Destroy()
+-- Only remove older versions of this GUI (keep everything else)
+do
+    local prefixes = { "MacTaskHub", "YEEBSHUB" } -- legacy names/prefixes to target
+    for _, gui in ipairs(PlayerGui:GetChildren()) do
+        if gui:IsA("ScreenGui") then
+            for _, prefix in ipairs(prefixes) do
+                if gui.Name:sub(1, #prefix) == prefix then
+                    -- destroy old matching GUIs, wrapped in pcall for safety
+                    pcall(function() gui:Destroy() end)
+                    break
+                end
+            end
+        end
     end
 end
 
