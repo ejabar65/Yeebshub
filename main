@@ -1,0 +1,738 @@
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
+local LocalPlayer = Players.LocalPlayer or Players:GetPropertyChangedSignal("LocalPlayer"):Wait() and Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+-- Remove other GUIs
+for _, gui in ipairs(PlayerGui:GetChildren()) do
+    if gui:IsA("ScreenGui") and gui.Name ~= "YEEBSHUB" then
+        gui:Destroy()
+    end
+end
+
+-- helper
+local function new(class, props)
+    local inst = Instance.new(class)
+    if props then
+        for k, v in pairs(props) do
+            if type(k) == "number" then
+                v.Parent = inst
+            else
+                inst[k] = v
+            end
+        end
+    end
+    return inst
+end
+
+-- Root ScreenGui
+local ScreenGui = new("ScreenGui", {
+    Name = "MacTaskHub",
+    ResetOnSpawn = false,
+    IgnoreGuiInset = true,
+    Parent = PlayerGui,
+})
+
+-- Taskbar (bottom)
+local TaskBar = new("Frame", {
+    Name = "TaskBar",
+    Parent = ScreenGui,
+    Size = UDim2.new(1, -20, 0, 62),
+    Position = UDim2.new(0, 10, 1, -72),
+    BackgroundColor3 = Color3.fromRGB(28, 28, 30),
+    BackgroundTransparency = 0.20,
+    ClipsDescendants = true,
+})
+new("UICorner", { Parent = TaskBar, CornerRadius = UDim.new(0, 16) })
+new("UIStroke", { Parent = TaskBar, Color = Color3.fromRGB(255,255,255), Transparency = 0.86, Thickness = 1.2 })
+
+-- Left: Avatar + name
+local Avatar = new("ImageLabel", {
+    Parent = TaskBar,
+    Name = "Avatar",
+    Size = UDim2.new(0, 44, 0, 44),
+    Position = UDim2.new(0, 14, 0, 9),
+    BackgroundTransparency = 1,
+    Image = "rbxthumb://type=AvatarHeadShot&id="..tostring(LocalPlayer.UserId).."&w=420&h=420"
+})
+new("UICorner", { Parent = Avatar, CornerRadius = UDim.new(1, 0) })
+
+local NameLabel = new("TextLabel", {
+    Parent = TaskBar,
+    Name = "NameLabel",
+    Position = UDim2.new(0, 72, 0, 6),
+    Size = UDim2.new(0, 420, 0, 24),
+    BackgroundTransparency = 1,
+    Text = (LocalPlayer.DisplayName ~= "" and LocalPlayer.DisplayName or LocalPlayer.Name).."  •",
+    Font = Enum.Font.GothamSemibold,
+    TextSize = 16,
+    TextColor3 = Color3.fromRGB(235,235,235),
+    TextXAlignment = Enum.TextXAlignment.Left,
+})
+
+local SubLabel = new("TextLabel", {
+    Parent = TaskBar,
+    Name = "SubLabel",
+    Position = UDim2.new(0, 72, 0, 28),
+    Size = UDim2.new(0, 420, 0, 18),
+    BackgroundTransparency = 1,
+    Text = "YEEBSHUB",
+    Font = Enum.Font.Gotham,
+    TextSize = 13,
+    TextColor3 = Color3.fromRGB(170,170,170),
+    TextXAlignment = Enum.TextXAlignment.Left,
+})
+
+-- Right: time & date
+local TimeLabel = new("TextLabel", {
+    Parent = TaskBar,
+    Name = "TimeLabel",
+    Size = UDim2.new(0, 240, 0, 24),
+    Position = UDim2.new(1, -250, 0, 8),
+    BackgroundTransparency = 1,
+    Font = Enum.Font.GothamSemibold,
+    TextSize = 16,
+    TextColor3 = Color3.fromRGB(235,235,235),
+    TextXAlignment = Enum.TextXAlignment.Right,
+    Text = "--:--",
+})
+local DateLabel = new("TextLabel", {
+    Parent = TaskBar,
+    Name = "DateLabel",
+    Size = UDim2.new(0, 240, 0, 18),
+    Position = UDim2.new(1, -250, 0, 32),
+    BackgroundTransparency = 1,
+    Font = Enum.Font.Gotham,
+    TextSize = 13,
+    TextColor3 = Color3.fromRGB(170,170,170),
+    TextXAlignment = Enum.TextXAlignment.Right,
+    Text = "Loading...",
+})
+
+-- Update time/date
+local function updateTime()
+    local now = os.date("*t")
+    local hour = now.hour
+    local ampm = "AM"
+    if hour >= 12 then ampm = "PM"; if hour > 12 then hour = hour - 12 end
+    elseif hour == 0 then hour = 12 end
+    TimeLabel.Text = string.format("%d:%02d %s", hour, now.min, ampm)
+    DateLabel.Text = os.date("%A, %b %d, %Y")
+end
+RunService.RenderStepped:Connect(updateTime)
+
+-- Hub (expands above taskbar)
+local Hub = new("Frame", {
+    Name = "Hub",
+    Parent = ScreenGui,
+    Size = UDim2.new(1, -40, 0, 0),
+    Position = UDim2.new(0, 20, 1, -72 - 0),
+    BackgroundColor3 = Color3.fromRGB(24,24,26),
+    BackgroundTransparency = 0.08,
+    ClipsDescendants = true,
+})
+new("UICorner", { Parent = Hub, CornerRadius = UDim.new(0, 12) })
+new("UIStroke", { Parent = Hub, Color = Color3.fromRGB(255,255,255), Transparency = 0.88, Thickness = 1 })
+
+-- Layout inside hub: left tabs column + content area
+local TabsColumn = new("Frame", {
+    Parent = Hub,
+    Name = "TabsColumn",
+    Size = UDim2.new(0, 180, 1, -20),
+    Position = UDim2.new(0, 10, 0, 10),
+    BackgroundTransparency = 1,
+})
+new("UICorner", { Parent = TabsColumn, CornerRadius = UDim.new(0, 8) })
+
+local TabsList = new("UIListLayout", {
+    Parent = TabsColumn,
+    FillDirection = Enum.FillDirection.Vertical,
+    Padding = UDim.new(0, 8),
+    HorizontalAlignment = Enum.HorizontalAlignment.Center,
+})
+
+local ContentArea = new("Frame", {
+    Parent = Hub,
+    Name = "ContentArea",
+    Size = UDim2.new(1, -220, 1, -20),
+    Position = UDim2.new(0, 200, 0, 10),
+    BackgroundTransparency = 1,
+})
+new("UICorner", { Parent = ContentArea, CornerRadius = UDim.new(0, 8) })
+
+-- Tabs definition
+local tabNames = {"Home", "Scripts", "Settings", "About", "Search"}
+local tabs = {}
+local panels = {}
+
+local selectedTab = nil
+
+local function selectTab(name)
+    if selectedTab == name then return end
+    selectedTab = name
+    for tName, btn in pairs(tabs) do
+        local isSel = tName == name
+        -- animate selection background / text color
+        if isSel then
+            TweenService:Create(btn.Indicator, TweenInfo.new(0.25, Enum.EasingStyle.Quad), {BackgroundTransparency = 0}):Play()
+            TweenService:Create(btn.Label, TweenInfo.new(0.25, Enum.EasingStyle.Quad), {TextColor3 = Color3.fromRGB(255,255,255)}):Play()
+        else
+            TweenService:Create(btn.Indicator, TweenInfo.new(0.25, Enum.EasingStyle.Quad), {BackgroundTransparency = 1}):Play()
+            TweenService:Create(btn.Label, TweenInfo.new(0.25, Enum.EasingStyle.Quad), {TextColor3 = Color3.fromRGB(180,180,180)}):Play()
+        end
+    end
+
+    -- show correct panel
+    for pName, panel in pairs(panels) do
+        panel.Visible = (pName == name)
+        if panel.Visible then
+            panel.Size = UDim2.new(1, 0, 1, 0)
+            panel.Position = UDim2.new(0, 0, 0, 0)
+            panel.ClipsDescendants = true
+            -- entrance animation
+            panel.BackgroundTransparency = 1
+            TweenService:Create(panel, TweenInfo.new(0.28, Enum.EasingStyle.Quad), {BackgroundTransparency = 0}):Play()
+        else
+            panel.Size = UDim2.new(1, 0, 1, 0)
+        end
+    end
+end
+
+-- build tabs & template panels
+for i, name in ipairs(tabNames) do
+    local row = new("Frame", {
+        Parent = TabsColumn,
+        Name = name.."Row",
+        Size = UDim2.new(1, -12, 0, 44),
+        BackgroundTransparency = 1,
+    })
+    local indicator = new("Frame", {
+        Parent = row,
+        Name = "Indicator",
+        Size = UDim2.new(0, 6, 1, 0),
+        Position = UDim2.new(0, 0, 0, 0),
+        BackgroundColor3 = Color3.fromRGB(60,160,255),
+        BackgroundTransparency = 1,
+    })
+    new("UICorner", { Parent = indicator, CornerRadius = UDim.new(0, 8) })
+
+    local label = new("TextLabel", {
+        Parent = row,
+        Name = "Label",
+        Position = UDim2.new(0, 16, 0, 0),
+        Size = UDim2.new(1, -16, 1, 0),
+        BackgroundTransparency = 1,
+        Text = name,
+        Font = Enum.Font.GothamSemibold,
+        TextSize = 16,
+        TextColor3 = Color3.fromRGB(180,180,180),
+        TextXAlignment = Enum.TextXAlignment.Left,
+    })
+
+    local btn = new("TextButton", {
+        Parent = row,
+        Name = "Btn",
+        Size = UDim2.new(1, 0, 1, 0),
+        BackgroundTransparency = 1,
+        Text = "",
+        AutoButtonColor = false,
+    })
+
+    -- hover feedback for row
+    btn.MouseEnter:Connect(function()
+        TweenService:Create(label, TweenInfo.new(0.18, Enum.EasingStyle.Quad), {TextColor3 = Color3.fromRGB(220,220,220)}):Play()
+    end)
+    btn.MouseLeave:Connect(function()
+        if selectedTab ~= name then
+            TweenService:Create(label, TweenInfo.new(0.18, Enum.EasingStyle.Quad), {TextColor3 = Color3.fromRGB(180,180,180)}):Play()
+        end
+    end)
+
+    btn.MouseButton1Click:Connect(function()
+        selectTab(name)
+    end)
+
+    tabs[name] = {Row = row, Indicator = indicator, Label = label, Button = btn}
+    tabs[name].Indicator = indicator
+    tabs[name].Label = label
+
+    -- create panel for this tab
+    local panel = new("Frame", {
+        Parent = ContentArea,
+        Name = name.."Panel",
+        Size = UDim2.new(1, 0, 1, 0),
+        Position = UDim2.new(0, 0, 0, 0),
+        BackgroundColor3 = Color3.fromRGB(32,32,34),
+        BackgroundTransparency = 0,
+        Visible = false,
+    })
+    new("UICorner", { Parent = panel, CornerRadius = UDim.new(0, 8) })
+
+    panels[name] = panel
+end
+
+-- Search panel (Roblox exploit script lookup)
+do
+    local p = panels["Search"]
+    local title = new("TextLabel", {
+        Parent = p,
+        Position = UDim2.new(0, 20, 0, 14),
+        Size = UDim2.new(1, -40, 0, 28),
+        BackgroundTransparency = 1,
+        Text = "Script Search",
+        Font = Enum.Font.GothamBold,
+        TextSize = 16,
+        TextColor3 = Color3.fromRGB(230,230,230),
+        TextXAlignment = Enum.TextXAlignment.Left,
+    })
+
+    local searchBox = new("TextBox", {
+        Parent = p,
+        Position = UDim2.new(0, 20, 0, 52),
+        Size = UDim2.new(0, 260, 0, 36),
+        BackgroundColor3 = Color3.fromRGB(48,48,50),
+        Text = "",
+        PlaceholderText = "Search for scripts...",
+        Font = Enum.Font.Gotham,
+        TextSize = 14,
+        TextColor3 = Color3.fromRGB(230,230,230),
+    })
+    new("UICorner", { Parent = searchBox, CornerRadius = UDim.new(0,8) })
+
+    local searchBtn = new("TextButton", {
+        Parent = p,
+        Position = UDim2.new(0, 290, 0, 52),
+        Size = UDim2.new(0, 80, 0, 36),
+        BackgroundColor3 = Color3.fromRGB(58,138,255),
+        Text = "Search",
+        Font = Enum.Font.GothamBold,
+        TextSize = 14,
+        TextColor3 = Color3.fromRGB(255,255,255),
+        AutoButtonColor = false,
+    })
+    new("UICorner", { Parent = searchBtn, CornerRadius = UDim.new(0,8) })
+
+    local resultsFrame = new("ScrollingFrame", {
+        Parent = p,
+        Position = UDim2.new(0, 20, 0, 100),
+        Size = UDim2.new(1, -40, 1, -120),
+        BackgroundTransparency = 1,
+        CanvasSize = UDim2.new(0, 0, 0, 0),
+        ScrollBarThickness = 6,
+    })
+    local layout = new("UIListLayout", { Parent = resultsFrame, Padding = UDim.new(0,8), SortOrder = Enum.SortOrder.LayoutOrder })
+
+    local function showResults(scripts)
+        resultsFrame:ClearAllChildren()
+        local layout = new("UIListLayout", { Parent = resultsFrame, Padding = UDim.new(0,8), SortOrder = Enum.SortOrder.LayoutOrder })
+        for i, s in ipairs(scripts) do
+            local card = new("Frame", {
+                Parent = resultsFrame,
+                Size = UDim2.new(1, -8, 0, 56),
+                BackgroundColor3 = Color3.fromRGB(44,44,46),
+                LayoutOrder = i,
+            })
+            new("UICorner", { Parent = card, CornerRadius = UDim.new(0,8) })
+            local label = new("TextLabel", {
+                Parent = card,
+                Position = UDim2.new(0, 12, 0, 8),
+                Size = UDim2.new(0.7, -12, 0, 20),
+                BackgroundTransparency = 1,
+                Text = s.name or "Unknown",
+                Font = Enum.Font.GothamSemibold,
+                TextSize = 15,
+                TextColor3 = Color3.fromRGB(230,230,230),
+                TextXAlignment = Enum.TextXAlignment.Left,
+            })
+            local runBtn = new("TextButton", {
+                Parent = card,
+                Position = UDim2.new(1, -96, 0, 10),
+                Size = UDim2.new(0, 80, 0, 36),
+                BackgroundColor3 = Color3.fromRGB(58,138,255),
+                Text = "Run",
+                Font = Enum.Font.GothamBold,
+                TextSize = 14,
+                TextColor3 = Color3.fromRGB(255,255,255),
+                AutoButtonColor = false,
+            })
+            new("UICorner", { Parent = runBtn, CornerRadius = UDim.new(0,8) })
+            runBtn.MouseButton1Click:Connect(function()
+                if s.url and s.url ~= "" then
+                    pcall(function()
+                        loadstring(game:HttpGet(s.url))()
+                    end)
+                end
+            end)
+        end
+        -- update canvas size
+        if layout then
+            resultsFrame.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 12)
+        end
+    end
+
+    local function searchScripts(query)
+        -- ScriptBlox API search
+        local url = "https://scriptblox.com/api/script/search?q="..HttpService:UrlEncode(query)
+        local ok, resp = pcall(function()
+            return game:HttpGet(url)
+        end)
+        if ok and resp then
+            local data = HttpService:JSONDecode(resp)
+            local scripts = {}
+            if data and data.result and data.result.scripts then
+                for _, item in ipairs(data.result.scripts) do
+                    local rawUrl = ""
+                    if item.script then
+                        -- extract URL from loadstring
+                        rawUrl = item.script:match('game:HttpGet%(%s*"([^"]+)"') or ""
+                    end
+                    table.insert(scripts, {
+                        name = item.title or "Unknown",
+                        url = rawUrl,
+                    })
+                end
+            end
+            showResults(scripts)
+        else
+            showResults({})
+        end
+    end
+
+    searchBtn.MouseButton1Click:Connect(function()
+        local query = searchBox.Text
+        if query and query ~= "" then
+            showResults({})
+            searchScripts(query)
+        end
+    end)
+end
+
+-- populate template buttons in each panel
+
+-- Home panel
+do
+    local p = panels["Home"]
+    local info = new("TextLabel", {
+        Parent = p,
+        Position = UDim2.new(0, 20, 0, 14),
+        Size = UDim2.new(1, -40, 0, 28),
+        BackgroundTransparency = 1,
+        Text = "Welcome — quick actions",
+        Font = Enum.Font.GothamBold,
+        TextSize = 16,
+        TextColor3 = Color3.fromRGB(230,230,230),
+        TextXAlignment = Enum.TextXAlignment.Left,
+    })
+
+    local actions = {
+        {label = "Open Scripts Tab", cb = function() selectTab("Scripts") end},
+        {label = "Toggle Settings", cb = function() selectTab("Settings") end},
+        {label = "Close Hub", cb = function()
+            -- animate collapse
+            TweenService:Create(Hub, TweenInfo.new(0.4, Enum.EasingStyle.Quint), {Size = UDim2.new(1, -40, 0, 0), Position = UDim2.new(0, 20, 1, -72)}):Play()
+            hubOpen = false
+        end},
+    }
+
+    for i, act in ipairs(actions) do
+        local b = new("TextButton", {
+            Parent = p,
+            Position = UDim2.new(0, 20, 0, 14 + 46 * i),
+            Size = UDim2.new(0, 220, 0, 40),
+            BackgroundColor3 = Color3.fromRGB(48,48,50),
+            Text = act.label,
+            Font = Enum.Font.GothamSemibold,
+            TextSize = 15,
+            TextColor3 = Color3.fromRGB(240,240,240),
+            AutoButtonColor = false,
+        })
+        new("UICorner", { Parent = b, CornerRadius = UDim.new(0,8) })
+        b.MouseEnter:Connect(function() TweenService:Create(b, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(64,72,92)}):Play() end)
+        b.MouseLeave:Connect(function() TweenService:Create(b, TweenInfo.new(0.15), {BackgroundColor3 = Color3.fromRGB(48,48,50)}):Play() end)
+        b.MouseButton1Click:Connect(function()
+            -- click animation
+            TweenService:Create(b, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, true), {Position = b.Position + UDim2.new(0,6,0,0)}):Play()
+            pcall(act.cb)
+        end)
+    end
+end
+
+-- Scripts panel (example list + run buttons)
+do
+    local p = panels["Scripts"]
+    local title = new("TextLabel", {
+        Parent = p,
+        Position = UDim2.new(0, 20, 0, 14),
+        Size = UDim2.new(1, -40, 0, 28),
+        BackgroundTransparency = 1,
+        Text = "Scripts",
+        Font = Enum.Font.GothamBold,
+        TextSize = 16,
+        TextColor3 = Color3.fromRGB(230,230,230),
+        TextXAlignment = Enum.TextXAlignment.Left,
+    })
+
+    local scriptsList = new("ScrollingFrame", {
+        Parent = p,
+        Position = UDim2.new(0, 20, 0, 52),
+        Size = UDim2.new(1, -60, 1, -80),
+        BackgroundTransparency = 1,
+        CanvasSize = UDim2.new(0, 0, 0, 0),
+        ScrollBarThickness = 6,
+    })
+    new("UIListLayout", { Parent = scriptsList, Padding = UDim.new(0,8), SortOrder = Enum.SortOrder.LayoutOrder })
+
+    -- template scripts
+    local sampleScripts = {
+        {name = "Frontlines ESP, AIMBOT, and FOV RING", action = function() loadstring(game:HttpGet("https://raw.githubusercontent.com/PUSCRIPTS/PINGUIN/refs/heads/main/FrontLines"))()
+loadstring(game:HttpGet("https://raw.githubusercontent.com/ejabar65/frontlines/refs/heads/main/main"))() end},
+        {name = "Ring parts floating rings around your player best in natural disaster survival", action = function() loadstring(game:HttpGet('https://pastebin.com/raw/s6jT7YbN'))() end},
+        {name = "MORE SOON", action = function() print("skidder!") end},
+    }
+
+    for i, s in ipairs(sampleScripts) do
+        local card = new("Frame", {
+            Parent = scriptsList,
+            Size = UDim2.new(1, -8, 0, 56),
+            BackgroundColor3 = Color3.fromRGB(44,44,46),
+            LayoutOrder = i,
+        })
+        new("UICorner", { Parent = card, CornerRadius = UDim.new(0,8) })
+        local label = new("TextLabel", {
+            Parent = card,
+            Position = UDim2.new(0, 12, 0, 8),
+            Size = UDim2.new(0.7, -12, 0, 20),
+            BackgroundTransparency = 1,
+            Text = s.name,
+            Font = Enum.Font.GothamSemibold,
+            TextSize = 15,
+            TextColor3 = Color3.fromRGB(230,230,230),
+            TextXAlignment = Enum.TextXAlignment.Left,
+        })
+        local runBtn = new("TextButton", {
+            Parent = card,
+            Position = UDim2.new(1, -96, 0, 10),
+            Size = UDim2.new(0, 80, 0, 36),
+            BackgroundColor3 = Color3.fromRGB(58,138,255),
+            Text = "Run",
+            Font = Enum.Font.GothamBold,
+            TextSize = 14,
+            TextColor3 = Color3.fromRGB(255,255,255),
+            AutoButtonColor = false,
+        })
+        new("UICorner", { Parent = runBtn, CornerRadius = UDim.new(0,8) })
+        runBtn.MouseEnter:Connect(function() TweenService:Create(runBtn, TweenInfo.new(0.12), {Size = UDim2.new(0, 86, 0, 40)}):Play() end)
+        runBtn.MouseLeave:Connect(function() TweenService:Create(runBtn, TweenInfo.new(0.12), {Size = UDim2.new(0, 80, 0, 36)}):Play() end)
+        runBtn.MouseButton1Click:Connect(function()
+            -- run template action
+            pcall(s.action)
+            -- feedback flash
+            local orig = runBtn.BackgroundColor3
+            TweenService:Create(runBtn, TweenInfo.new(0.14), {BackgroundColor3 = Color3.fromRGB(80,200,120)}):Play()
+            task.delay(0.22, function()
+                pcall(function()
+                    TweenService:Create(runBtn, TweenInfo.new(0.22), {BackgroundColor3 = orig}):Play()
+                end)
+            end)
+        end)
+    end
+
+    -- update canvas size after populating
+    local layout = scriptsList:FindFirstChildOfClass("UIListLayout")
+    if layout then
+        layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+            scriptsList.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 12)
+        end)
+    end
+end
+
+-- Settings panel (template toggles & sliders)
+do
+    local p = panels["Settings"]
+    local title = new("TextLabel", {
+        Parent = p,
+        Position = UDim2.new(0, 20, 0, 14),
+        Size = UDim2.new(1, -40, 0, 28),
+        BackgroundTransparency = 1,
+        Text = "Settings",
+        Font = Enum.Font.GothamBold,
+        TextSize = 16,
+        TextColor3 = Color3.fromRGB(230,230,230),
+        TextXAlignment = Enum.TextXAlignment.Left,
+    })
+
+    local toggle = new("TextButton", {
+        Parent = p,
+        Position = UDim2.new(0, 20, 0, 64),
+        Size = UDim2.new(0, 220, 0, 40),
+        BackgroundColor3 = Color3.fromRGB(48,48,50),
+        Text = "Enable Feature (OFF)",
+        Font = Enum.Font.GothamSemibold,
+        TextSize = 14,
+        TextColor3 = Color3.fromRGB(230,230,230),
+        AutoButtonColor = false,
+    })
+    new("UICorner", { Parent = toggle, CornerRadius = UDim.new(0,8) })
+    local enabled = false
+    toggle.MouseButton1Click:Connect(function()
+        enabled = not enabled
+        toggle.Text = "Enable Feature ("..(enabled and "ON" or "OFF")..")"
+        TweenService:Create(toggle, TweenInfo.new(0.18), {BackgroundColor3 = enabled and Color3.fromRGB(58,138,255) or Color3.fromRGB(48,48,50)}):Play()
+    end)
+
+    local sliderLabel = new("TextLabel", {
+        Parent = p,
+        Position = UDim2.new(0, 20, 0, 116),
+        Size = UDim2.new(0, 260, 0, 18),
+        BackgroundTransparency = 1,
+        Text = "Volume",
+        Font = Enum.Font.Gotham,
+        TextSize = 14,
+        TextColor3 = Color3.fromRGB(200,200,200),
+        TextXAlignment = Enum.TextXAlignment.Left,
+    })
+
+    local sliderBar = new("Frame", {
+        Parent = p,
+        Position = UDim2.new(0, 20, 0, 138),
+        Size = UDim2.new(0, 260, 0, 12),
+        BackgroundColor3 = Color3.fromRGB(48,48,50),
+    })
+    new("UICorner", { Parent = sliderBar, CornerRadius = UDim.new(0,6) })
+    local fill = new("Frame", {
+        Parent = sliderBar,
+        Size = UDim2.new(0.45, 0, 1, 0),
+        BackgroundColor3 = Color3.fromRGB(58,138,255)
+    })
+    new("UICorner", { Parent = fill, CornerRadius = UDim.new(0,6) })
+
+    sliderBar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            local function updateFill(pos)
+                local rel = math.clamp((pos.X - sliderBar.AbsolutePosition.X) / sliderBar.AbsoluteSize.X, 0, 1)
+                fill.Size = UDim2.new(rel, 0, 1, 0)
+            end
+            local conn
+            conn = UserInputService.InputChanged:Connect(function(inp)
+                if inp.UserInputType == Enum.UserInputType.MouseMovement then
+                    updateFill(inp.Position)
+                end
+            end)
+            local upConn
+            upConn = UserInputService.InputEnded:Connect(function(inp)
+                if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+                    conn:Disconnect()
+                    upConn:Disconnect()
+                end
+            end)
+        end
+    end)
+end
+
+-- About panel
+do
+    local p = panels["About"]
+    local title = new("TextLabel", {
+        Parent = p,
+        Position = UDim2.new(0, 20, 0, 14),
+        Size = UDim2.new(1, -40, 0, 28),
+        BackgroundTransparency = 1,
+        Text = "About",
+        Font = Enum.Font.GothamBold,
+        TextSize = 16,
+        TextColor3 = Color3.fromRGB(230,230,230),
+        TextXAlignment = Enum.TextXAlignment.Left,
+    })
+
+    local body = new("TextLabel", {
+        Parent = p,
+        Position = UDim2.new(0, 20, 0, 52),
+        Size = UDim2.new(0.6, -20, 0, 120),
+        BackgroundTransparency = 1,
+        Text = "Yeebshub V.1.0",
+        Font = Enum.Font.Gotham,
+        TextSize = 14,
+        TextColor3 = Color3.fromRGB(190,190,190),
+        TextWrapped = true,
+        TextXAlignment = Enum.TextXAlignment.Left,
+    })
+end
+
+-- keep hub closed initially
+local hubOpen = false
+Hub.Size = UDim2.new(1, -40, 0, 0)
+Hub.Position = UDim2.new(0, 20, 1, -72)
+
+-- open/close animation
+local function setHub(open)
+    hubOpen = open
+    if open then
+        TweenService:Create(Hub, TweenInfo.new(0.45, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+            Size = UDim2.new(1, -40, 0, 360),
+            Position = UDim2.new(0, 20, 1, -72 - 360),
+        }):Play()
+        -- select default tab
+        selectTab("Home")
+    else
+        TweenService:Create(Hub, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
+            Size = UDim2.new(1, -40, 0, 0),
+            Position = UDim2.new(0, 20, 1, -72),
+        }):Play()
+    end
+end
+
+-- toggle when clicking taskbar background (but not on interactive child elements)
+TaskBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        setHub(not hubOpen)
+    end
+end)
+
+-- close hub when clicking outside
+ScreenGui.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        local mouse = UserInputService:GetMouseLocation()
+        local x, y = mouse.X, mouse.Y
+        local hubPos = Hub.AbsolutePosition
+        local hubSize = Hub.AbsoluteSize
+        if hubOpen then
+            local insideHub = x >= hubPos.X and x <= hubPos.X + hubSize.X and y >= hubPos.Y and y <= hubPos.Y + hubSize.Y
+            local insideBar = x >= TaskBar.AbsolutePosition.X and x <= TaskBar.AbsolutePosition.X + TaskBar.AbsoluteSize.X and y >= TaskBar.AbsolutePosition.Y and y <= TaskBar.AbsolutePosition.Y + TaskBar.AbsoluteSize.Y
+            if not insideHub and not insideBar then
+                setHub(false)
+            end
+        end
+    end
+end)
+
+-- Escape closes
+UserInputService.InputBegan:Connect(function(input, gp)
+    if gp then return end
+    if input.KeyCode == Enum.KeyCode.Escape and hubOpen then
+        setHub(false)
+    end
+end)
+
+-- initial entrance animations
+TaskBar.BackgroundTransparency = 1
+TweenService:Create(TaskBar, TweenInfo.new(0.9, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {BackgroundTransparency = 0.20}):Play()
+Avatar.ImageTransparency = 1
+TweenService:Create(Avatar, TweenInfo.new(1.0, Enum.EasingStyle.Back), {ImageTransparency = 0}):Play()
+NameLabel.TextTransparency = 1
+TweenService:Create(NameLabel, TweenInfo.new(0.9), {TextTransparency = 0}):Play()
+SubLabel.TextTransparency = 1
+TweenService:Create(SubLabel, TweenInfo.new(0.95), {TextTransparency = 0}):Play()
+TimeLabel.TextTransparency = 1
+DateLabel.TextTransparency = 1
+TweenService:Create(TimeLabel, TweenInfo.new(0.95), {TextTransparency = 0}):Play()
+TweenService:Create(DateLabel, TweenInfo.new(0.95), {TextTransparency = 0}):Play()
+
+-- finalize by selecting Home tab (keeps nothing visible until opened)
+for k,v in pairs(panels) do v.Visible = false end
+selectTab("Home")
+Hub.Visible = true
+
+-- END
